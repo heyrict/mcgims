@@ -300,9 +300,11 @@ def select_attend_info(cookies=None):
         - 1: 已考勤
         - 4: 放假
     """
-    res = post_form(EP_SELECT_ATTEND_INFO, {
-        'attend_state': 3,
-    }, cookies=cookies)
+    res = post_form(
+        EP_SELECT_ATTEND_INFO, {
+            'attend_state': 3,
+        }, cookies=cookies
+    )
 
     return [
         {
