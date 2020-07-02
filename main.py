@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("rich")
-log.setLevel(logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO")))
+logging.setLevel(logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO")))
 
 HOST = "mcgims.njmu.edu.cn"
 HOSTNAME = f"http://{HOST}"
@@ -102,7 +102,7 @@ def post_form(endpoint, data, cookies=None):
         exit(1)
     response = response.json()
     log.debug(f"- response: {response}")
-    if response.get('success') == "false":
+    if response.get('success') == False:
         log.error("Error posting form on endpoint {endpoint}:")
         log.error("Response:")
         log.error(response)
@@ -137,7 +137,7 @@ def get_form(endpoint, data=None, cookies=None):
         exit(1)
     response = response.json()
     log.debug(f"- response: {response}")
-    if response.get('success') == "false":
+    if response.get('success') == False:
         log.error("Error posting form on endpoint {endpoint}:")
         log.error("Response:")
         log.error(response)
@@ -228,6 +228,9 @@ def auth(username, password, cookies=None):
             },
             cookies=cookies
         )
+    else:
+        log.error("Unrecognised login type")
+        return {}
 
     return returns
 
@@ -374,6 +377,7 @@ class Actions:
     INIT_SCHEDULE = "INIT_SCHEDULE"
     CONFIRM_SCHEDULE = "CONFIRM_SCHEDULE"
     ATTEND_TODAY = "ATTEND_TODAY"
+    ATTEND_TODAY_ALL = "ATTEND_TODAY_ALL"
 
     @classmethod
     def choices(cls):
@@ -451,6 +455,23 @@ def main():
             manage_attend_state(
                 st_attend_info["id"], st_info['auth_id'], cookies=ad_cookies
             )
+    if args.action == Actions.ATTEND_TODAY_ALL:
+        ad_cookies = get_session_id()
+        ad_info = auth(
+            config['admin']['username'],
+            config['admin']['password'],
+            cookies=ad_cookies
+        )
+        attend_list = select_attend_info(cookies=ad_cookies)
+        for attend in attend_list:
+            if attend.get("attend_state") == 1:
+                log.warning(
+                    f"User {st_info['user_name']} is already attended today"
+                )
+            else:
+                manage_attend_state(
+                    attend["id"], st_info['auth_id'], cookies=ad_cookies
+                )
 
 
 if __name__ == "__main__":
