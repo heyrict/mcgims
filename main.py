@@ -13,11 +13,13 @@ import yaml
 
 FORMAT = "%(message)s"
 logging.basicConfig(
-    level="NOTSET", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+    level=logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO")),
+    format=FORMAT,
+    datefmt="[%X]",
+    handlers=[RichHandler()]
 )
 
 log = logging.getLogger("rich")
-logging.setLevel(logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO")))
 
 HOST = "mcgims.njmu.edu.cn"
 HOSTNAME = f"http://{HOST}"
@@ -312,9 +314,9 @@ def select_attend_info(cookies=None):
     return [
         {
             'stu_auth_id': data.get('stu_auth_id'),
-            'id': data.get('id'),
+            'id': data.get('id', f"line{i}"),
             'attend_state': data.get('attend_state'),
-        } for data in res['data']
+        } for i, data in enumerate(res['data'])
     ]
 
 
@@ -331,7 +333,10 @@ def manage_attend_state(
     - attend_state: 更新后出勤情况。见 select_attend_info
     """
     if isinstance(date, datetime):
-        date = datetime.strftime("%Y-%m-%d")
+        date = date.strftime("%Y-%m-%d")
+
+    if gid is None:
+        gid = "line0"
 
     res = post_form(
         EP_MANAGE_ATTEND_STATE, {
@@ -385,6 +390,7 @@ class Actions:
             cls.INIT_SCHEDULE,
             cls.CONFIRM_SCHEDULE,
             cls.ATTEND_TODAY,
+            cls.ATTEND_TODAY_ALL,
         ]
 
 
@@ -464,13 +470,9 @@ def main():
         )
         attend_list = select_attend_info(cookies=ad_cookies)
         for attend in attend_list:
-            if attend.get("attend_state") == 1:
-                log.warning(
-                    f"User {st_info['user_name']} is already attended today"
-                )
-            else:
+            if attend.get("attend_state") != 1:
                 manage_attend_state(
-                    attend["id"], st_info['auth_id'], cookies=ad_cookies
+                    attend["id"], attend['stu_auth_id'], cookies=ad_cookies
                 )
 
 
