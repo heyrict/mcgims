@@ -4,8 +4,9 @@ from sys import exit
 import re
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from rich.logging import RichHandler
+from json import dumps
 
 import requests
 import logging
@@ -31,8 +32,16 @@ EP_LOGIN_ROLE = f"{HOSTNAME}/loginweb/loginbyauth.action"
 EP_GET_TRAIN_TIME = f"{HOSTNAME}/configweb/getTrainTime.action"
 EP_SAVE_HOL_ARRAY = f"{HOSTNAME}/configweb/saveHolArr.action"
 EP_SAVE_HOL_ARRAY_T = f"{HOSTNAME}/configweb/saveHolArrT.action"
+EP_AUDIT_THROUGH = f"{HOSTNAME}/teachweb/auditThrough.action"
+EP_GET_STUDENT_INPUT = f"{HOSTNAME}/teachweb/getStuInputById.action"
 EP_SELECT_ATTEND_INFO = f"{HOSTNAME}/teachweb/selectStuAttendanceInfoList.action"
+EP_SELECT_ATTEND_LIST = f"{HOSTNAME}/teachweb/selectAttendanceList.action"
 EP_MANAGE_ATTEND_STATE = f"{HOSTNAME}/teachweb/manageAttendState.action"
+EP_CHANGE_ATTEND_STATE = f"{HOSTNAME}/teachweb/changeAttendanceState.action"
+
+EP_FORM_LIST = f"{HOSTNAME}/scoreweb/getFormList.action"
+EP_FORM_INFO = f"{HOSTNAME}/basicdataweb/getFormInfoById.action"
+EP_MARKSHEET_SUBLIST = f"{HOSTNAME}/basicdataweb/queryMarksheetSubList.action"
 
 EP_VAPP_LOGIN = f"{HOSTNAME}/app/Vapp_login.action"
 
@@ -260,9 +269,11 @@ def save_hol_arr(arr, cookies=None):
     # Parameters
     - arr: 上班日期的列表, 日期格式为 "%Y%m%d", e.g. ["20200630", "20200701"]
     """
-    res = post_form(EP_SAVE_HOL_ARRAY, {
-        'array': arr,
-    }, cookies=cookies)
+    res = post_form(
+        EP_SAVE_HOL_ARRAY, {
+            'array': dumps(arr),
+        }, cookies=cookies
+    )
 
 
 def save_hol_arr_t(cookies=None):
@@ -272,6 +283,44 @@ def save_hol_arr_t(cookies=None):
     res = post_form(EP_SAVE_HOL_ARRAY_T, {
         'array': None,
     }, cookies=cookies)
+
+
+def audit_through(data_id, content=None, cookies=None):
+    """
+    （教师）审核数据
+    """
+    res = post_form(
+        EP_AUDIT_THROUGH, {
+            'id': data_id,
+            'content': content,
+        },
+        cookies=cookies
+    )
+
+
+def get_student_input(student_id, cookies=None):
+    """
+    （教师）获取学生需数据审核内容
+
+    # Returns
+    An array of the following object
+    - "id": 数据 ID
+    - "order_name": 数据名称
+    - "create_time_str": 时间
+    """
+    res = post_form(
+        EP_GET_STUDENT_INPUT, {
+            'stuAuthId': student_id,
+        }, cookies=cookies
+    )
+
+    return [
+        {
+            'id': data.get('id'),
+            'order_name': data.get('order_name'),
+            'create_time_str': data.get('create_time_str'),
+        } for data in res['data']
+    ]
 
 
 def init_schedule(cookies=None):
@@ -320,6 +369,71 @@ def select_attend_info(cookies=None):
     ]
 
 
+def select_attend_list(student_id, start, end, cookies=None):
+    """
+    （教师）获取学生出勤情况
+
+    # Returns
+    An array of the following object
+    - "attend_time_str": 签到时间
+    - "attend_state_str": 出勤情况
+    """
+    if isinstance(start, str):
+        start = datetime.fromtimestamp(start)
+    if isinstance(end, str):
+        end = datetime.fromtimestamp(end)
+
+    res = post_form(
+        EP_SELECT_ATTEND_LIST, {
+            'stu_auth_id': student_id,
+            'train_start_year': "%04d" % start.year,
+            'train_start_month': "%02d" % start.month,
+            'train_start_day': "%02d" % start.day,
+            'train_end_year': "%04d" % end.year,
+            'train_end_month': "%02d" % end.month,
+            'train_end_day': "%02d" % end.day,
+        },
+        cookies=cookies
+    )
+
+    return [
+        {
+            'attend_time_str': data.get('attend_time_str'),
+            'attend_state_str': data.get('attend_state_str'),
+        } for data in res['data']
+    ]
+
+
+def change_attendance_state(
+    student_id, gid=None, date=datetime.now(), attend_state=1, cookies=None
+):
+    """
+    （教师）更新学生出勤情况
+
+    # Parameters
+    - gid: 轮转编号？
+    - student_id: 即 `stu_auth_id`, 学生编号
+    - date: 出勤日期 (datetime object or `%Y-%m-%d` styled string)
+    - attend_state: 更新后出勤情况。见 select_attend_info
+    """
+    from datetime import date as D
+    if isinstance(date, datetime) or isinstance(date, D):
+        date = date.strftime("%Y-%m-%d")
+
+    if gid is None:
+        gid = "line0"
+
+    res = post_form(
+        EP_CHANGE_ATTEND_STATE, {
+            'id': gid,
+            'stu_auth_id': student_id,
+            'attend_state': attend_state,
+            'attend_time_str': date,
+        },
+        cookies=cookies
+    )
+
+
 def manage_attend_state(
     gid, student_id, date=datetime.now(), attend_state=1, cookies=None
 ):
@@ -347,6 +461,120 @@ def manage_attend_state(
         },
         cookies=cookies
     )
+
+
+def get_form_list(student_id, orga_id, apply_again=False, cookies=None):
+    """
+    （学生）获取评价表列表
+
+    # Parameters
+    - student_id: 即 `stu_auth_id`, 学生编号
+    - orga_id: 科室编号
+    - apply_again: 是否为第二次申请
+
+    # Returns
+    Either `None` or a list of elements of the following shape
+
+    - flag: number
+    - form_id: number
+    - id: null
+    - name: string
+    - orderCondition: null
+    - orga_id: null
+    - pub_num: number
+    - queryCondition: null
+    - role_id: null
+    - sfm_id: number?
+    - state: null
+    - stu_type_id: null
+    - tfc_id: null
+    - type_id: number
+    """
+    apply_again_flag = 1 if apply_again else -1
+    res = post_form(
+        EP_FORM_LIST,
+        {
+            "s_user_auth_id": student_id,
+            "s_orga_id": orga_id,
+            "applyAgainFlag": apply_again_flag,
+        },
+        cookies=cookies,
+    )
+    return res.get("data")
+
+
+def get_form_info(
+    form_id, flag, student_id, orga_id, sfm_id=None, cookies=None
+):
+    """
+    （学生）获取评价表详细信息
+
+    # Parameters
+    - form_id: 评价表类型编号
+    - flag: 是否已填写
+    - student_id: 即 `stu_auth_id`, 学生编号
+    - orga_id: 科室编号
+    - sfm_id
+
+    # Returns
+    Either `None` or an object of the following shape
+
+    - related_id: number
+    - availability: "Y" | "N"
+    ...
+    """
+    res = post_form(
+        EP_FORM_INFO,
+        {
+            "id": form_id,
+            "flag": flag,
+            "flag_read": -10,
+            "s_user_auth_id": student_id,
+            "s_orga_id": orga_id,
+            "create_auth_id": -100,
+            "sfm_id": None,
+        },
+        cookies=cookies,
+    )
+    return res.get("data")
+
+
+def get_form_info(
+    form_id, flag, student_id, orga_id, sfm_id=None, cookies=None
+):
+    """
+    （学生）获取评价表选项
+
+    # Parameters
+    - mmid: 评价表类型编号
+
+    # Returns
+    Either `None` or a list of elements of the following shape
+
+    - id: number
+    - item_type_code: "NUM" | ""  // 选项类型
+    - title: string
+    - type_code: 0 | 1  // 1 即需要填写的内容 (leaf)
+    - ms_id: number  // 该选项上级选项编号
+    - mm_id: same as input `mmid`
+    - avg_sco: number
+    - form_id: 0
+    ...
+    """
+    res = post_form(
+        EP_MARKSHEET_SUBLIST,
+        {
+            "id": form_id,
+            "flag": flag,
+            "flag_read": -10,
+            "s_user_auth_id": student_id,
+            "s_orga_id": orga_id,
+            "create_auth_id": -100,
+            "sfm_id": None,
+        },
+        cookies=cookies,
+    )
+    return res.get("rows")
 
 
 def get_config(file_path="./config.yaml"):
@@ -383,6 +611,8 @@ class Actions:
     CONFIRM_SCHEDULE = "CONFIRM_SCHEDULE"
     ATTEND_TODAY = "ATTEND_TODAY"
     ATTEND_TODAY_ALL = "ATTEND_TODAY_ALL"
+    ATTEND_DATE = "ATTEND_DATE"
+    AUDIT_ALL = "AUDIT_ALL"
 
     @classmethod
     def choices(cls):
@@ -391,6 +621,8 @@ class Actions:
             cls.CONFIRM_SCHEDULE,
             cls.ATTEND_TODAY,
             cls.ATTEND_TODAY_ALL,
+            cls.ATTEND_DATE,
+            cls.AUDIT_ALL,
         ]
 
 
@@ -406,6 +638,8 @@ def main():
         help="Path to the config file",
         type=str
     )
+    parser.add_argument('-s', '--start', help="Start date", type=str)
+    parser.add_argument('-e', '--end', help="End date", type=str)
     parser.add_argument("action", choices=Actions.choices())
 
     args = parser.parse_args()
@@ -474,6 +708,66 @@ def main():
                 manage_attend_state(
                     attend["id"], attend['stu_auth_id'], cookies=ad_cookies
                 )
+    if args.action == Actions.ATTEND_DATE:
+        auth_id = config['student'].get("auth_id")
+        if auth_id is None:
+            auth_id = get_auth_id(
+                config['student']['username'],
+                config['student']['password'],
+            )
+
+        ad_cookies = get_session_id()
+        ad_info = auth(
+            config['admin']['username'],
+            config['admin']['password'],
+            cookies=ad_cookies
+        )
+
+        DATE_RE = re.compile(r"(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)")
+        m = DATE_RE.match(args.start)
+        start_date = date(int(m['year']), int(m['month']), int(m['day']))
+        m = DATE_RE.match(args.end)
+        end_date = date(int(m['year']), int(m['month']), int(m['day']))
+
+        i = 0
+        while end_date >= start_date:
+            log.info(f"Attending date {end_date}")
+            change_attendance_state(
+                gid=f"line{i}",
+                student_id=auth_id,
+                date=end_date,
+                cookies=ad_cookies
+            )
+            end_date -= timedelta(days=1)
+            i += 1
+
+        for row in select_attend_list(
+            auth_id, start_date, end_date, cookies=ad_cookies
+        ):
+            log.info(f"{row['attend_time_str']} -> {row['attend_state_str']}")
+
+    if args.action == Actions.AUDIT_ALL:
+        ad_cookies = get_session_id()
+        ad_info = auth(
+            config['admin']['username'],
+            config['admin']['password'],
+            cookies=ad_cookies
+        )
+        auth_id = config['student'].get("auth_id")
+        data_list = get_student_input(auth_id, cookies=ad_cookies)
+        for data in data_list:
+            audit_through(data['id'], cookies=ad_cookies)
+            log.info(f"审核通过: {data['order_name']}")
+
+
+def get_auth_id(username, password):
+    st_cookies = get_session_id()
+    st_info = auth(
+        username,
+        password,
+        cookies=st_cookies,
+    )
+    return st_info['auth_id']
 
 
 if __name__ == "__main__":
